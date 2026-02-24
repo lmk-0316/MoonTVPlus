@@ -8,7 +8,7 @@ import { getAuthInfoFromCookie } from '@/lib/auth';
 import { SimpleCrypto } from '@/lib/crypto';
 import { db } from '@/lib/db';
 import { CURRENT_VERSION } from '@/lib/version';
-import { updateProgress, clearProgress } from '../progress/route';
+import { updateProgress, clearProgress } from '@/lib/data-migration-progress';
 
 export const runtime = 'nodejs';
 
@@ -35,6 +35,8 @@ export async function POST(req: NextRequest) {
     if (authInfo.username !== process.env.USERNAME) {
       return NextResponse.json({ error: '权限不足，只有站长可以导出数据' }, { status: 401 });
     }
+
+    const username = authInfo.username; // 存储到局部变量以便 TypeScript 类型推断
 
     const config = await db.getAdminConfig();
     if (!config) {
@@ -80,7 +82,7 @@ export async function POST(req: NextRequest) {
 
     // 为每个用户收集数据（只导出V2用户）- 使用并行处理
     console.log(`开始并行导出 ${allUsers.length} 个用户的数据...`);
-    updateProgress(authInfo.username, 'export', 'collecting', 0, allUsers.length, '开始收集用户数据...');
+    updateProgress(username, 'export', 'collecting', 0, allUsers.length, '开始收集用户数据...');
 
     // 分块处理用户，每批处理数量可通过环境变量配置
     const CHUNK_SIZE = parseInt(process.env.DATA_MIGRATION_CHUNK_SIZE || '10', 10);
@@ -160,7 +162,7 @@ export async function POST(req: NextRequest) {
           exportedCount++;
           // 每处理完一个用户就更新进度
           updateProgress(
-            authInfo.username,
+            username,
             'export',
             'collecting',
             exportedCount,
@@ -176,15 +178,15 @@ export async function POST(req: NextRequest) {
     console.log(`成功导出 ${exportedCount} 个用户的数据`);
 
     // 将数据转换为JSON字符串
-    updateProgress(authInfo.username, 'export', 'serializing', exportedCount, exportedCount, '正在序列化数据...');
+    updateProgress(username, 'export', 'serializing', exportedCount, exportedCount, '正在序列化数据...');
     const jsonData = JSON.stringify(exportData);
 
     // 先压缩数据
-    updateProgress(authInfo.username, 'export', 'compressing', exportedCount, exportedCount, '正在压缩数据...');
+    updateProgress(username, 'export', 'compressing', exportedCount, exportedCount, '正在压缩数据...');
     const compressedData = await gzipAsync(jsonData);
 
     // 使用提供的密码加密压缩后的数据
-    updateProgress(authInfo.username, 'export', 'encrypting', exportedCount, exportedCount, '正在加密数据...');
+    updateProgress(username, 'export', 'encrypting', exportedCount, exportedCount, '正在加密数据...');
     const encryptedData = SimpleCrypto.encrypt(compressedData.toString('base64'), password);
 
     // 生成文件名
@@ -193,8 +195,8 @@ export async function POST(req: NextRequest) {
     const filename = `moontv-backup-${timestamp}.dat`;
 
     // 清除进度信息
-    updateProgress(authInfo.username, 'export', 'completed', exportedCount, exportedCount, '导出完成！');
-    setTimeout(() => clearProgress(authInfo.username, 'export'), 3000);
+    updateProgress(username, 'export', 'completed', exportedCount, exportedCount, '导出完成！');
+    setTimeout(() => clearProgress(username, 'export'), 3000);
 
     // 返回加密的数据作为文件下载
     return new NextResponse(encryptedData, {

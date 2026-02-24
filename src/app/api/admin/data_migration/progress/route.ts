@@ -3,27 +3,9 @@
 import { NextRequest } from 'next/server';
 
 import { getAuthInfoFromCookie } from '@/lib/auth';
+import { getProgress } from '@/lib/data-migration-progress';
 
 export const runtime = 'nodejs';
-
-// 存储进度信息的 Map
-const progressStore = new Map<string, {
-  phase: string;
-  current: number;
-  total: number;
-  message: string;
-  timestamp: number;
-}>();
-
-// 清理过期的进度信息（超过5分钟）
-setInterval(() => {
-  const now = Date.now();
-  for (const [key, value] of progressStore.entries()) {
-    if (now - value.timestamp > 5 * 60 * 1000) {
-      progressStore.delete(key);
-    }
-  }
-}, 60 * 1000);
 
 export async function GET(req: NextRequest) {
   // 验证身份和权限
@@ -36,14 +18,14 @@ export async function GET(req: NextRequest) {
     return new Response('Forbidden', { status: 403 });
   }
 
+  const username = authInfo.username; // 存储到局部变量以便 TypeScript 类型推断
+
   const { searchParams } = new URL(req.url);
   const operation = searchParams.get('operation'); // 'export' or 'import'
 
   if (!operation) {
     return new Response('Missing operation parameter', { status: 400 });
   }
-
-  const progressKey = `${authInfo.username}:${operation}`;
 
   // 创建 SSE 响应
   const encoder = new TextEncoder();
@@ -54,7 +36,7 @@ export async function GET(req: NextRequest) {
     start(controller) {
       const sendProgress = () => {
         try {
-          const progress = progressStore.get(progressKey);
+          const progress = getProgress(username, operation as 'export' | 'import');
           if (progress) {
             const data = JSON.stringify(progress);
             controller.enqueue(encoder.encode(`data: ${data}\n\n`));
@@ -96,29 +78,4 @@ export async function GET(req: NextRequest) {
       'Connection': 'keep-alive',
     },
   });
-}
-
-// 辅助函数：更新进度
-export function updateProgress(
-  username: string,
-  operation: 'export' | 'import',
-  phase: string,
-  current: number,
-  total: number,
-  message: string
-) {
-  const progressKey = `${username}:${operation}`;
-  progressStore.set(progressKey, {
-    phase,
-    current,
-    total,
-    message,
-    timestamp: Date.now(),
-  });
-}
-
-// 辅助函数：清除进度
-export function clearProgress(username: string, operation: 'export' | 'import') {
-  const progressKey = `${username}:${operation}`;
-  progressStore.delete(progressKey);
 }

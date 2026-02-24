@@ -8,7 +8,7 @@ import { getAuthInfoFromCookie } from '@/lib/auth';
 import { configSelfCheck, setCachedConfig } from '@/lib/config';
 import { SimpleCrypto } from '@/lib/crypto';
 import { db } from '@/lib/db';
-import { updateProgress, clearProgress } from '../progress/route';
+import { updateProgress, clearProgress } from '@/lib/data-migration-progress';
 
 export const runtime = 'nodejs';
 
@@ -35,6 +35,8 @@ export async function POST(req: NextRequest) {
     if (authInfo.username !== process.env.USERNAME) {
       return NextResponse.json({ error: '权限不足，只有站长可以导入数据' }, { status: 401 });
     }
+
+    const username = authInfo.username; // 存储到局部变量以便 TypeScript 类型推断
 
     // 解析表单数据
     const formData = await req.formData();
@@ -79,7 +81,7 @@ export async function POST(req: NextRequest) {
     }
 
     // 开始导入数据 - 先清空现有数据
-    updateProgress(authInfo.username, 'import', 'clearing', 0, 1, '正在清空现有数据...');
+    updateProgress(username, 'import', 'clearing', 0, 1, '正在清空现有数据...');
     await db.clearAllData();
 
     // 额外清除所有V2用户（clearAllData可能只清除旧版用户）
@@ -111,7 +113,7 @@ export async function POST(req: NextRequest) {
 
     const userCount = Object.keys(userData).length;
     console.log(`准备导入 ${userCount} 个用户的数据`);
-    updateProgress(authInfo.username, 'import', 'importing', 0, userCount, '开始导入用户数据...');
+    updateProgress(username, 'import', 'importing', 0, userCount, '开始导入用户数据...');
 
     // 分块处理用户，每批处理数量可通过环境变量配置
     const CHUNK_SIZE = parseInt(process.env.DATA_MIGRATION_CHUNK_SIZE || '10', 10);
@@ -122,7 +124,7 @@ export async function POST(req: NextRequest) {
       const chunk = usernames.slice(i, i + CHUNK_SIZE);
       console.log(`处理第 ${Math.floor(i / CHUNK_SIZE) + 1} 批用户 (${chunk.length} 个)`);
       updateProgress(
-        authInfo.username,
+        username,
         'import',
         'importing',
         importedCount,
@@ -268,7 +270,7 @@ export async function POST(req: NextRequest) {
                 for (let j = 0; j < reversed.length; j += DATA_BATCH_SIZE) {
                   const batch = reversed.slice(j, j + DATA_BATCH_SIZE);
                   await Promise.all(
-                    batch.map(keyword => db.addSearchHistory(username, keyword))
+                    batch.map((keyword: string) => db.addSearchHistory(username, keyword))
                   );
                 }
               }
@@ -328,7 +330,7 @@ export async function POST(req: NextRequest) {
                     for (let j = 0; j < playlist.songs.length; j += DATA_BATCH_SIZE) {
                       const batch = playlist.songs.slice(j, j + DATA_BATCH_SIZE);
                       await Promise.all(
-                        batch.map(song =>
+                        batch.map((song: any) =>
                           db.addSongToPlaylist(playlist.id, {
                             platform: song.platform,
                             id: song.id,
@@ -360,7 +362,7 @@ export async function POST(req: NextRequest) {
 
       console.log(`已完成 ${importedCount}/${userCount} 个用户`);
       updateProgress(
-        authInfo.username,
+        username,
         'import',
         'importing',
         importedCount,
@@ -370,8 +372,8 @@ export async function POST(req: NextRequest) {
     }
 
     console.log(`成功导入 ${importedCount} 个用户的user:info`);
-    updateProgress(authInfo.username, 'import', 'completed', importedCount, userCount, '导入完成！');
-    setTimeout(() => clearProgress(authInfo.username, 'import'), 3000);
+    updateProgress(username, 'import', 'completed', importedCount, userCount, '导入完成！');
+    setTimeout(() => clearProgress(username, 'import'), 3000);
 
     return NextResponse.json({
       message: '数据导入成功',
